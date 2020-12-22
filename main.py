@@ -200,12 +200,14 @@ class ECAPA_TDNN(nn.Module):
 
 def main():
 
-    model = ECAPA_TDNN()
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+    model = ECAPA_TDNN().to(device)
 
     input_tensor = torch.rand(B, M, T)
     ground_truth_tensor = torch.randint(0, T, (B,))
 
-    tensor = model(input_tensor, ground_truth_tensor)
+    tensor = model(input_tensor.to(device), ground_truth_tensor.to(device))
 
     print(tensor.shape)
     # print(input_tensor.shape)
