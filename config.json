@@ -11,7 +11,7 @@
     "hp":{
         "SR": 22050,
         "NUM_WORKERS": 4,
-        "BATCH_SIZE": 16,
+        "BATCH_SIZE": 2,
         "MEL_MIN": -12,
         "NUM_EPOCH": 144,
         "LR": 1e-5,

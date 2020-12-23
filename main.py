@@ -1,6 +1,13 @@
 import torch
-from torch import nn
+from torch import nn, optim
 import torch.nn.functional as F
+from tqdm import tqdm
+
+import numpy as np
+
+from prepare_batch_loader import get_dataloader
+
+from tensorboardX import SummaryWriter
 
 B, M, T = 4, 80, 17
 
@@ -19,11 +26,23 @@ H_ATT = 128
 
 H_FC = 192
 
-NUM_SPEAKERS = 6000
+# NUM_SPEAKERS = 6000
 
-HYPER_RADIUS = 5
+HYPER_RADIUS = 1.0
 
 AMM_MARGIN = 0.2
+
+LOGGING_STEPS = 300
+
+def label2mask(label, h):
+    B = len(label)
+    H = h
+    mask = torch.zeros([B, H], requires_grad=False)
+    mask[torch.arange(B), label] = 1
+    # for i, l in enumerate(label):
+    #     mask[i, l] = 1.0
+        
+    return mask
 
 class AttentiveStatPooling(nn.Module):
 
@@ -110,18 +129,24 @@ class SE_RES2Block(nn.Module):
 
         s = torch.unsqueeze(s, dim=2) # (B, C, 1)
 
+        # s = torch.unsqueeze(s, dim=-1)
+
         se = s * tensor # (B, C, 1) * (B, C, T) = (B, C, T)
 
         # print(z.shape)
         # print(s.shape)
 
-        tensor += se
+        tensor = tensor + se
+
+        # tensor += se 
+        # RuntimeError: one of the variables needed for gradient computation 
+        # has been modified by an inplace operation
 
         return tensor
 
 class ECAPA_TDNN(nn.Module):
 
-    def __init__(self):
+    def __init__(self, NUM_SPEAKERS, device):
         super(ECAPA_TDNN, self).__init__()
 
         self.conv1d_in = nn.Conv1d(80, H_CONV, 5, padding=2)
@@ -141,11 +166,15 @@ class ECAPA_TDNN(nn.Module):
 
         self.batchnorm_3 = nn.BatchNorm1d(H_FC)
 
-        self.speaker_embedding  = nn.utils.weight_norm(nn.Linear(H_FC, NUM_SPEAKERS), dim=0)
+        self.speaker_embedding = nn.utils.weight_norm(nn.Linear(H_FC, NUM_SPEAKERS), dim=0)
 
         self.scale = HYPER_RADIUS
         
         self.m = torch.tensor(AMM_MARGIN, requires_grad=False)
+
+        self.num_speakers = NUM_SPEAKERS
+
+        self.device = device
 
     def forward(self, input_tensor, ground_truth_tensor):
 
@@ -170,7 +199,7 @@ class ECAPA_TDNN(nn.Module):
 
         tensor = self.fc(tensor)
 
-        tensor = self.batchnorm_3(tensor) # (B, H)
+        # tensor = self.batchnorm_3(tensor) # (B, H)
 
         tensor_g = torch.norm(tensor, dim=1, keepdim=True)
 
@@ -183,11 +212,43 @@ class ECAPA_TDNN(nn.Module):
         tensor = tensor / layer_g.squeeze(1)
 
         # v * torch.cos(self.m) + (1 - v * v) * torch.sin(self.m)
-        # - v * v + v + 1 + torch.cos(self.m) + torch.sin(self.m)
+        # (masked v)* torch.cos(self.m)
+        # + torch.sqrt(masked - (masked v) * (masked v)) * torch.sin(self.m)
+        # - (masked v)
 
-        for i, label in enumerate(ground_truth_tensor):
-            tensor[i, label] = - tensor[i, label] * tensor[i, label] + tensor[i,  label]  + 1 + \
-                                 torch.cos(self.m) + torch.sin(self.m)
+        mask = label2mask(ground_truth_tensor, self.num_speakers).to(self.device)
+
+        masked_embedding = tensor * mask
+        modified_angle = torch.acos(masked_embedding) + self.m * mask
+        modified_angle = torch.clamp(modified_angle, 0, torch.acos(torch.tensor(-1.0)))
+        modified_cos = torch.cos(modified_angle)
+        tensor = tensor + modified_cos - masked_embedding
+
+        '''
+        https://kevinmusgrave.github.io/pytorch-metric-learning/losses/#arcfaceloss
+        '''
+
+        # cos_embed = torch.cos(self.m) * masked_embedding
+        # masked_embedding_square = masked_embedding * masked_embedding
+        # sin_embed_square = mask - masked_embedding_square
+        # sin_embed = torch.sin(self.m) * torch.sqrt(sin_embed_square)
+        # modified_embedding = cos_embed - sin_embed - masked_embedding
+
+        # modified_embedding = torch.cos(self.m) * masked_embedding - \
+        #     torch.sin(self.m) * torch.sqrt(mask - masked_embedding * masked_embedding) - \
+        #     masked_embedding
+
+
+        # modified_embedding = torch.cos(self.m) * masked_embedding - \
+        #     masked_embedding
+        
+        # tensor = tensor + modified_embedding
+
+        tensor = self.scale * tensor
+
+        # for i, label in enumerate(ground_truth_tensor):
+        #     t = tensor[i, label].clone()
+        #     tensor[i, label] = - t * t + t  + 1 + torch.cos(self.m) + torch.sin(self.m)
 
         '''
         All systems are trained using AAM-softmax [6, 25] with a margin of 0.2 and 
@@ -202,14 +263,58 @@ def main():
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    model = ECAPA_TDNN().to(device)
+    dataset_dev, dataset_test, dev_speakers, test_speakers = get_dataloader('vox1', 19)
 
-    input_tensor = torch.rand(B, M, T)
-    ground_truth_tensor = torch.randint(0, T, (B,))
+    model = ECAPA_TDNN(len(dev_speakers), device).to(device)
 
-    tensor = model(input_tensor.to(device), ground_truth_tensor.to(device))
+    optimizer = optim.Adam(model.parameters(), lr=1e-6)
 
-    print(tensor.shape)
+    loss_func = nn.NLLLoss()
+
+    # input_tensor = torch.rand(B, M, T)
+    # ground_truth_tensor = torch.randint(0, T, (B,))
+
+    summary_writer = SummaryWriter()
+    
+
+    model.train()
+
+    # torch.autograd.set_detect_anomaly(True)
+
+    loss_list = list()
+    step = 0
+
+    for mels, mel_length, speakers in tqdm(dataset_dev):
+
+        optimizer.zero_grad()
+        pred_tensor = model(mels.to(device), speakers.to(device))
+        loss = loss_func(pred_tensor, speakers.to(device))
+        loss.backward()
+        optimizer.step()
+
+        step += 1
+        loss_list.append(loss.item())
+
+        if step % LOGGING_STEPS == 0:
+            print(loss_list)
+            loss_mean = np.mean(loss_list)
+            # loss_mean = np.nanmean(loss_list)
+            summary_writer.add_scalar('train/loss', loss_mean, step)
+            loss_list = list()
+
+
+    # for mels, mel_length, speakers in tqdm(dataset_test):
+    #     print(mels.shape)
+    #     print(speakers)
+    #     # plot_mel_spectrograms(mels, 'test')
+
+    #     # break
+    #     # pass
+    #     break
+
+    model.eval()
+
+    # print(tensor.shape)
     # print(input_tensor.shape)
 
     # print("main")

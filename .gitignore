@@ -3,4 +3,5 @@ VoxCeleb1/
 VoxCeleb2/
 __pycache__
 *.csv
-
+runs/
+nohup.out

@@ -23,6 +23,8 @@ Folder Structure
 
 CONFIGURATION_FILE = 'config.json'
 
+T_THRES = 19
+
 with open(CONFIGURATION_FILE) as f:
     data = f.read()
     json_info = json.loads(data)
@@ -104,7 +106,7 @@ def plot_mel_spectrograms(mel_tensor, keyword=''):
 
     return
 
-def collate_function(pairs):
+def collate_function(pairs, speaker_table):
 
     mels = list()
     speakers = list()
@@ -122,10 +124,11 @@ def collate_function(pairs):
         mel = normalize_tensor(mel, MEL_MIN)
         mels.append(mel) 
         mel_lengths.append(mel.shape[0])
-        speakers.append(speaker)
+        speakers.append(speaker_table[speaker])
 
     mel_tensor = pad_sequence(mels, batch_first=True, padding_value=-1).transpose(1, 2) # (B, T, MB) -> (B, MB, T)
     mel_lengths = torch.tensor(mel_lengths)
+    speakers = torch.tensor(speakers)
 
     return mel_tensor, mel_lengths, speakers
 
@@ -140,9 +143,90 @@ def write_to_csv(meta_data, file_name):
 def read_from_csv(file_name):
     with open(f'{file_name}', 'r') as f:
         csv_reader = csv.reader(f)
-        meta = [line for line in tqdm(csv_reader)]
+        meta = [(line[0], line[1], float(line[2]), float(line[3])) for line in tqdm(csv_reader)]
              
     return meta
+
+class SpeakerDict():
+
+    def __init__(self, speakers):
+        self.speaker_array = sorted(speakers)
+        self.speaker_dict = {s: i for i, s in enumerate(self.speaker_array)}
+
+    def __getitem__(self, key):
+
+        if isinstance(key, int):
+            return self.speaker_array[key]
+
+        elif isinstance(key, str):
+            return self.speaker_dict[key]
+
+        else:
+            assert False, f'Invalid key for SpeakerDict {key}'
+
+    def __len__(self):
+        a = len(self.speaker_array)
+        b = len(self.speaker_dict)
+        assert a == b, f'{a} != {b}'
+        return a
+
+    def decode_speaker_tensor(self, tensor):
+        return [self.speaker_array[v] for v in tensor]
+
+def build_speaker_dict(meta):
+
+    speakers = list(set([m[1] for m in meta]))
+    speaker_dict =  SpeakerDict(speakers)
+
+    return speaker_dict
+
+def load_meta(keyword='vox1'):
+
+    if keyword == 'vox1':
+        wav_files_dev = sorted(glob('VoxCeleb1/vox1_dev' + '/*/*/*.wav'))
+        print(f'Len. wav_files_dev {len(wav_files_dev)}')
+
+        if not os.path.isfile('vox1_dev.csv'):
+            dev_meta = struct_meta(wav_files_dev)
+            write_to_csv(dev_meta, 'vox1_dev.csv')
+        else:
+            dev_meta = read_from_csv('vox1_dev.csv')
+
+        wav_files_test = sorted(glob('VoxCeleb1/vox1_test' + '/*/*/*.wav'))
+        print(f'Len. wav_files_test {len(wav_files_test)}')
+
+        if not os.path.isfile('vox1_test.csv'):
+            test_meta = struct_meta(wav_files_test)
+            write_to_csv(test_meta, 'vox1_test.csv')
+        else:
+            test_meta = read_from_csv('vox1_test.csv')
+    elif keyword == 'vox2':
+        # TODO
+        pass
+    else:
+        assert False, f'Wrong Keyword {keyword}'
+
+    return dev_meta, test_meta
+
+def get_dataloader(keyword='vox1', t_thres=19):
+    dev_meta, test_meta = load_meta(keyword)
+    
+    test_meta = [meta for meta in tqdm(test_meta) if meta[2] < t_thres]
+    dev_meta = [meta for meta in tqdm(dev_meta) if meta[2] < t_thres]
+    
+    test_speakers = build_speaker_dict(test_meta)
+    dev_speakers = build_speaker_dict(dev_meta)
+
+    dataset_dev = DataLoader(dev_meta, batch_size=BATCH_SIZE, 
+                               shuffle=True, num_workers=NUM_WORKERS,
+                               collate_fn=lambda x: collate_function(x, dev_speakers))
+
+    dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
+                              shuffle=False, num_workers=NUM_WORKERS,
+                              collate_fn=lambda x: collate_function(x, test_speakers),
+                              drop_last=True)
+
+    return dataset_dev, dataset_test, dev_speakers, test_speakers
 
 def main():
 
@@ -167,27 +251,50 @@ def main():
     # print('dev_meta fs: ', set(meta[3] for meta in dev_meta)) # 16000
     # print('test_meta fs: ', set(meta[3] for meta in test_meta)) # 16000
 
-    dataset_train = DataLoader(dev_meta, batch_size=BATCH_SIZE, 
+    test_meta = [meta for meta in tqdm(test_meta) if meta[2] < T_THRES]
+
+    dev_meta = [meta for meta in tqdm(dev_meta) if meta[2] < T_THRES]
+
+    test_speakers = build_speaker_dict(test_meta)
+
+    dev_speakers = build_speaker_dict(dev_meta)
+
+    print(f'Test speakers {len(test_speakers)}')
+    print(f'Dev speakers {len(dev_speakers)}')
+
+    dataset_dev = DataLoader(dev_meta, batch_size=BATCH_SIZE, 
                                shuffle=True, num_workers=NUM_WORKERS,
-                               collate_fn=collate_function)
+                               collate_fn=lambda x: collate_function(x, dev_speakers))
 
     dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
                               shuffle=False, num_workers=NUM_WORKERS,
-                              collate_fn=collate_function,
+                              collate_fn=lambda x: collate_function(x, test_speakers),
                               drop_last=True)
 
-    for mels, mel_length, speakers in dataset_train:
+    '''
+    https://discuss.pytorch.org/t/supplying-arguments-to-collate-fn/25754/4
+    1. collate_fn = lambda b, params=params: my_collator_with_param(b, params)
+    2. create a class that contains a __call__ method which will be passed to your DataLoader
+    '''
+
+    for mels, mel_length, speakers in tqdm(dataset_dev):
         print(mels.shape)
         print(speakers)
-        plot_mel_spectrograms(mels, 'dev')
 
-        break 
+        print(dev_speakers.decode_speaker_tensor(speakers))
+        # plot_mel_spectrograms(mels, 'dev')
 
-    for mels, mel_length, speakers in dataset_test:
+        # break 
+        # pass
+        break
+
+    for mels, mel_length, speakers in tqdm(dataset_test):
         print(mels.shape)
         print(speakers)
-        plot_mel_spectrograms(mels, 'test')
+        # plot_mel_spectrograms(mels, 'test')
 
+        # break
+        # pass
         break
 
     # speakers = dev_speakers | test_speakers
