@@ -284,23 +284,25 @@ def main():
     loss_list = list()
     step = 0
 
-    for mels, mel_length, speakers in tqdm(dataset_dev):
+    for epoch in range(NUM_EPOCH):
 
-        optimizer.zero_grad()
-        pred_tensor = model(mels.to(device), speakers.to(device))
-        loss = loss_func(pred_tensor, speakers.to(device))
-        loss.backward()
-        optimizer.step()
+        for mels, mel_length, speakers in tqdm(dataset_dev):
 
-        step += 1
-        loss_list.append(loss.item())
+            optimizer.zero_grad()
+            pred_tensor = model(mels.to(device), speakers.to(device))
+            loss = loss_func(pred_tensor, speakers.to(device))
+            loss.backward()
+            optimizer.step()
 
-        if step % LOGGING_STEPS == 0:
-            print(loss_list)
-            loss_mean = np.mean(loss_list)
-            # loss_mean = np.nanmean(loss_list)
-            summary_writer.add_scalar('train/loss', loss_mean, step)
-            loss_list = list()
+            step += 1
+            loss_list.append(loss.item())
+
+            if step % LOGGING_STEPS == 0:
+                print(loss_list)
+                loss_mean = np.mean(loss_list)
+                # loss_mean = np.nanmean(loss_list)
+                summary_writer.add_scalar('train/loss', loss_mean, step)
+                loss_list = list()
 
 
     # for mels, mel_length, speakers in tqdm(dataset_test):
