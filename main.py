@@ -34,6 +34,8 @@ AMM_MARGIN = 0.2
 
 LOGGING_STEPS = 300
 
+NUM_EPOCH = 24
+
 def label2mask(label, h):
     B = len(label)
     H = h

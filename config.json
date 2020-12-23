@@ -13,7 +13,7 @@
         "NUM_WORKERS": 4,
         "BATCH_SIZE": 2,
         "MEL_MIN": -12,
-        "NUM_EPOCH": 12,
+        "NUM_EPOCH": 24,
         "LR": 1e-5,
         "MASKING_RATIO": 0.1,
         "APPLY_SPECAUG": false,
