@@ -188,7 +188,7 @@ class ECAPA_TDNN(nn.Module):
 
         self.batchnorm_3 = nn.BatchNorm1d(H_FC)
 
-        self.speaker_embedding = nn.utils.weight_norm(nn.Linear(H_FC, NUM_SPEAKERS), dim=0)
+        self.speaker_embedding = nn.utils.weight_norm(nn.Linear(H_FC, NUM_SPEAKERS, bias=False), dim=0)
 
         self.scale = HYPER_RADIUS
         
@@ -312,7 +312,6 @@ def main():
     # ground_truth_tensor = torch.randint(0, T, (B,))
 
     summary_writer = SummaryWriter()
-    
 
     model.train()
 
@@ -351,13 +350,21 @@ def main():
 
                 acc_mean = np.mean(acc_list)
                 summary_writer.add_scalar('train/acc', acc_mean, step)
-                acc_list  = list()
+                acc_list = list()
 
                 # grad_norm_mean = np.mean(gradient_norm_list)
                 # summary_writer.add_scalar('train/grad_norm', grad_norm_mean, step)
                 # gradient_norm_list  = list()
 
                 summary_writer.add_scalar('train/grad_norm', get_grad_norm(model), step)
+                
+                for i, p in enumerate(model.speaker_embedding.parameters()):
+                    if i == 1:
+                        s = p.detach()
+                
+                cor_mat = torch.matmul(s, s.T).unsqueeze(0) # (1, H, W)
+                print(torch.max(cor_mat), torch.min(cor_mat))
+                summary_writer.add_image('train/speaker_correlation', cor_mat, step)
 
 
     # for mels, mel_length, speakers in tqdm(dataset_test):
