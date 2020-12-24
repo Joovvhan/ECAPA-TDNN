@@ -14,7 +14,7 @@
         "BATCH_SIZE": 2,
         "MEL_MIN": -12,
         "NUM_EPOCH": 24,
-        "LR": 1e-5,
+        "LR": 1e-7,
         "MASKING_RATIO": 0.1,
         "APPLY_SPECAUG": false,
         "APPLY_T_SHIFT": true,

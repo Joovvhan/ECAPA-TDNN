@@ -9,6 +9,10 @@ from prepare_batch_loader import get_dataloader
 
 from tensorboardX import SummaryWriter
 
+import json
+
+import sys
+
 B, M, T = 4, 80, 17
 
 '''
@@ -35,6 +39,22 @@ AMM_MARGIN = 0.2
 LOGGING_STEPS = 300
 
 NUM_EPOCH = 24
+
+global_scope = sys.modules[__name__]
+
+CONFIGURATION_FILE='config.json'
+
+with open(CONFIGURATION_FILE) as f:
+    data = f.read()
+    json_info = json.loads(data)
+
+    hp = json_info["hp"]
+
+    for key in hp:
+        setattr(global_scope, key, hp[key])
+        print(f'{key} == {hp[key]}')
+
+    # model_parameters = json_info["mp"]
 
 def label2mask(label, h):
     B = len(label)
@@ -261,6 +281,21 @@ class ECAPA_TDNN(nn.Module):
 
         return prediction
 
+
+# https://discuss.pytorch.org/t/check-the-norm-of-gradients/27961
+def get_grad_norm(model):
+
+    # This function increases training time twice longer
+
+    total_norm = 0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+    grad_norm = total_norm ** (1. / 2)
+
+    return grad_norm
+
 def main():
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -269,7 +304,7 @@ def main():
 
     model = ECAPA_TDNN(len(dev_speakers), device).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-6)
+    optimizer = optim.Adam(model.parameters(), lr=LR)
 
     loss_func = nn.NLLLoss()
 
@@ -284,6 +319,8 @@ def main():
     # torch.autograd.set_detect_anomaly(True)
 
     loss_list = list()
+    acc_list = list()
+    # gradient_norm_list = list()
     step = 0
 
     for epoch in range(NUM_EPOCH):
@@ -291,20 +328,36 @@ def main():
         for mels, mel_length, speakers in tqdm(dataset_dev):
 
             optimizer.zero_grad()
-            pred_tensor = model(mels.to(device), speakers.to(device))
+            pred_tensor = model(mels.to(device), speakers.to(device)) # (B, NUM_SPEAKERS)
             loss = loss_func(pred_tensor, speakers.to(device))
             loss.backward()
             optimizer.step()
 
             step += 1
             loss_list.append(loss.item())
+            
+            prediction = torch.argmax(pred_tensor, axis=-1)
+            acc = (torch.sum((prediction == speakers.to(device)), dtype=torch.float32)/len(speakers)).detach().cpu().numpy()
+            acc_list.append(acc)
+
+            # gradient_norm_list.append(get_grad_norm(model))
 
             if step % LOGGING_STEPS == 0:
-                print(loss_list)
+                # print(loss_list)
                 loss_mean = np.mean(loss_list)
                 # loss_mean = np.nanmean(loss_list)
                 summary_writer.add_scalar('train/loss', loss_mean, step)
                 loss_list = list()
+
+                acc_mean = np.mean(acc_list)
+                summary_writer.add_scalar('train/acc', acc_mean, step)
+                acc_list  = list()
+
+                # grad_norm_mean = np.mean(gradient_norm_list)
+                # summary_writer.add_scalar('train/grad_norm', grad_norm_mean, step)
+                # gradient_norm_list  = list()
+
+                summary_writer.add_scalar('train/grad_norm', get_grad_norm(model), step)
 
 
     # for mels, mel_length, speakers in tqdm(dataset_test):
