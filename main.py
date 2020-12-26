@@ -83,6 +83,8 @@ def cor_matrix_to_plt_image(matrix_tensor, step):
     image_array = np.swapaxes(image_array, 0, 2)
     image_array = np.swapaxes(image_array, 1, 2)
 
+    plt.close()
+
     return image_array
 
 class AttentiveStatPooling(nn.Module):
@@ -194,8 +196,8 @@ class ECAPA_TDNN(nn.Module):
         self.batchnorm_in = nn.BatchNorm1d(H_CONV)
 
         self.se_res2block_1 = SE_RES2Block(8, 3, 2)
-        self.se_res2block_2 = SE_RES2Block(8, 3, 3)
-        self.se_res2block_3 = SE_RES2Block(8, 3, 4)
+        # self.se_res2block_2 = SE_RES2Block(8, 3, 3)
+        # self.se_res2block_3 = SE_RES2Block(8, 3, 4)
 
         self.conv1d_out = nn.Conv1d(3 * H_CONV, 3 * H_CONV, 1)
 
@@ -211,7 +213,7 @@ class ECAPA_TDNN(nn.Module):
 
         self.scale = HYPER_RADIUS
         
-        self.m = torch.tensor(AMM_MARGIN, requires_grad=False)
+        self.m = torch.tensor(AMM_MARGIN, requires_grad=False).to(device)
 
         self.num_speakers = NUM_SPEAKERS
 
@@ -224,10 +226,11 @@ class ECAPA_TDNN(nn.Module):
         tensor = self.batchnorm_in(tensor)
 
         tensor_1 = self.se_res2block_1(tensor)   # (B, C, T)
-        tensor_2 = self.se_res2block_2(tensor_1) # (B, C, T)
-        tensor_3 = self.se_res2block_3(tensor_2) # (B, C, T)
+        # tensor_2 = self.se_res2block_2(tensor_1) # (B, C, T)
+        # tensor_3 = self.se_res2block_3(tensor_2) # (B, C, T)
 
-        tensor = torch.cat([tensor_1, tensor_2, tensor_3], axis=1) # (B, 3C, T)
+        # tensor = torch.cat([tensor_1, tensor_2, tensor_3], axis=1) # (B, 3C, T)
+        tensor = torch.cat([tensor_1, tensor_1, tensor_1], axis=1) # (B, 3C, T)
         tensor = F.relu(tensor)
 
         '''

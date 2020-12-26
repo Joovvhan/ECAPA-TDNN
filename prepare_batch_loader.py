@@ -11,6 +11,8 @@ import librosa
 import csv
 import os
 
+from functools import partial
+
 from tqdm import tqdm
 
 '''
@@ -217,14 +219,36 @@ def get_dataloader(keyword='vox1', t_thres=19):
     test_speakers = build_speaker_dict(test_meta)
     dev_speakers = build_speaker_dict(dev_meta)
 
+    # def dev_collator(pairs):
+    #     return collate_function(pairs, dev_speakers)
+
+    # def test_collator(pairs):
+    #     return collate_function(pairs, test_speakers)
+
+    # dataset_dev = DataLoader(dev_meta, batch_size=BATCH_SIZE, 
+    #                            shuffle=True, num_workers=NUM_WORKERS,
+    #                            collate_fn=dev_collator)
+
     dataset_dev = DataLoader(dev_meta, batch_size=BATCH_SIZE, 
-                               shuffle=True, num_workers=NUM_WORKERS,
-                               collate_fn=lambda x: collate_function(x, dev_speakers))
+                            shuffle=True, num_workers=NUM_WORKERS,
+                            collate_fn=partial(collate_function, speaker_table=dev_speakers))
+
+    # dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
+    #                           shuffle=False, num_workers=NUM_WORKERS,
+    #                           collate_fn=lambda x: collate_function(x, test_speakers),
+    #                           drop_last=True)
+    # AttributeError: Can't pickle local object 'get_dataloader.<locals>.<lambda>'
+    # AttributeError: Can't pickle local object 'get_dataloader.<locals>.dev_collator'
+
+    # dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
+    #                         shuffle=False, num_workers=NUM_WORKERS,
+    #                         collate_fn=test_collator,
+    #                         drop_last=True)
 
     dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
-                              shuffle=False, num_workers=NUM_WORKERS,
-                              collate_fn=lambda x: collate_function(x, test_speakers),
-                              drop_last=True)
+                        shuffle=False, num_workers=NUM_WORKERS,
+                        collate_fn=partial(collate_function, speaker_table=test_speakers),
+                        drop_last=True)
 
     return dataset_dev, dataset_test, dev_speakers, test_speakers
 
