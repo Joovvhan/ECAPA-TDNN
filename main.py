@@ -13,6 +13,8 @@ import json
 
 import sys
 
+import matplotlib.pyplot as plt
+
 B, M, T = 4, 80, 17
 
 '''
@@ -65,6 +67,23 @@ def label2mask(label, h):
     #     mask[i, l] = 1.0
         
     return mask
+
+def cor_matrix_to_plt_image(matrix_tensor, step):
+    
+    fig = plt.figure(figsize=(36, 36))
+    plt.title(f'Speaker Embedding Correlation #{step:07d}', fontsize=24, y=0.95)
+    plt.imshow(matrix_tensor)
+    plt.colorbar()
+    plt.clim([-1, 1])
+    fig.canvas.draw()
+
+    image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+    image_array = np.swapaxes(image_array, 0, 2)
+    image_array = np.swapaxes(image_array, 1, 2)
+
+    return image_array
 
 class AttentiveStatPooling(nn.Module):
 
@@ -364,7 +383,9 @@ def main():
                 
                 cor_mat = torch.matmul(s, s.T).unsqueeze(0) # (1, H, W)
                 print(torch.max(cor_mat), torch.min(cor_mat))
-                summary_writer.add_image('train/speaker_correlation', cor_mat, step)
+                matrix_image = cor_matrix_to_plt_image(cor_mat, step)
+                summary_writer.add_image('train/speaker_correlation', matrix_image, step)
+                # summary_writer.add_image('train/speaker_correlation', cor_mat, step)
 
 
     # for mels, mel_length, speakers in tqdm(dataset_test):
