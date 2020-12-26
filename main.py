@@ -71,7 +71,7 @@ def label2mask(label, h):
 def cor_matrix_to_plt_image(matrix_tensor, step):
     
     fig = plt.figure(figsize=(36, 36))
-    plt.title(f'Speaker Embedding Correlation #{step:07d}', fontsize=24, y=0.95)
+    plt.title(f'Speaker Embedding Correlation #{step:07d}', fontsize=24)
     plt.imshow(matrix_tensor)
     plt.colorbar()
     plt.clim([-1, 1])
@@ -378,12 +378,17 @@ def main():
                 summary_writer.add_scalar('train/grad_norm', get_grad_norm(model), step)
                 
                 for i, p in enumerate(model.speaker_embedding.parameters()):
-                    if i == 1:
-                        s = p.detach()
+                    if i == 0:
+                        g = p.detach()
+                    elif i == 1:
+                        v = p.detach()
+
+                n = v / g
                 
-                cor_mat = torch.matmul(s, s.T).unsqueeze(0) # (1, H, W)
+                cor_mat = torch.matmul(n, n.T) # (H, W)
+                # cor_mat = torch.matmul(s, s.T).unsqueeze(0) # (1, H, W)
                 print(torch.max(cor_mat), torch.min(cor_mat))
-                matrix_image = cor_matrix_to_plt_image(cor_mat, step)
+                matrix_image = cor_matrix_to_plt_image(cor_mat.cpu(), step)
                 summary_writer.add_image('train/speaker_correlation', matrix_image, step)
                 # summary_writer.add_image('train/speaker_correlation', cor_mat, step)
 
