@@ -120,7 +120,12 @@ def collate_function(pairs, speaker_table):
         # (wav_file, clean_script, clean_jamos, tag, len(clean_script), len(clean_jamos), wav_file_dur)
         wav_file = pair[0]
         speaker =  pair[1]
-        mel = MEL2SAMPWAVEGLOW.get_mel(wav_file).T # (MB, T) -> (T, MB)
+        npy_file = wav_file.replace('.wav', '.npy')
+        if not os.path.isfile(npy_file):
+            mel = MEL2SAMPWAVEGLOW.get_mel(wav_file).T # (MB, T) -> (T, MB)
+            np.save(npy_file, mel)
+        else:
+            mel = torch.tensor(np.load(npy_file)) # (T, MB)
         mel = apply_t_shift(mel, MEL_MIN)
         mel = mel_random_masking(mel, MASKING_RATIO, MEL_MIN)
         mel = normalize_tensor(mel, MEL_MIN)
