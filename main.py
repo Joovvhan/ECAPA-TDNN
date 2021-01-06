@@ -15,6 +15,8 @@ import sys
 
 import matplotlib.pyplot as plt
 
+import os
+
 B, M, T = 4, 80, 17
 
 '''
@@ -46,6 +48,8 @@ global_scope = sys.modules[__name__]
 
 CONFIGURATION_FILE='config.json'
 
+ONCE = True
+
 with open(CONFIGURATION_FILE) as f:
     data = f.read()
     json_info = json.loads(data)
@@ -54,7 +58,7 @@ with open(CONFIGURATION_FILE) as f:
 
     for key in hp:
         setattr(global_scope, key, hp[key])
-        print(f'{key} == {hp[key]}')
+    #    print(f'{key} == {hp[key]}')
 
     # model_parameters = json_info["mp"]
 
@@ -87,6 +91,25 @@ def cor_matrix_to_plt_image(matrix_tensor, step):
 
     return image_array
 
+def alpha_matrix_to_plt_image(alpha_matrix, step):
+    
+    fig = plt.figure(figsize=(36, 6))
+    plt.title(f'Alpha Matrix #{step:07d}', fontsize=24)
+    plt.imshow(alpha_matrix[0, :, :])
+    plt.colorbar()
+    # plt.clim([0, 1])
+    fig.canvas.draw()
+
+    image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+    image_array = np.swapaxes(image_array, 0, 2)
+    image_array = np.swapaxes(image_array, 1, 2)
+
+    plt.close()
+
+    return image_array
+
 class AttentiveStatPooling(nn.Module):
 
     def __init__(self):
@@ -94,23 +117,35 @@ class AttentiveStatPooling(nn.Module):
         self.linear1 = nn.Linear(3 * H_CONV, H_ATT)
         self.linear2 = nn.Linear(H_ATT, 3 * H_CONV)   
 
-    def forward(self, input_tensor):
+    def forward(self, input_tensor, mask_tensor=None):
         h = input_tensor.transpose(1, 2) # (B, H, L) =>  (B, L, H) 
         tensor = F.relu(self.linear1(h)) # (B, L, 128) 
         e_tensor = self.linear2(tensor) # (B, L, 1536) 
-        a_tensor = F.softmax(e_tensor, dim=-1) # (B, L, 1536)
+        # a_tensor = F.softmax(e_tensor, dim=-1) # (B, L, 1536)
+        a_tensor = F.softmax(e_tensor, dim=1) # (B, L, 1536)
 
-        h_mean = torch.sum(torch.mul(h, a_tensor), dim=1, keepdim=False) # (B, H)
+        a_h_tensor = torch.mul(a_tensor, h) # (B, L, 1536)
+
+        h_mean = torch.sum(a_h_tensor, dim=1, keepdim=False) # (B, H)
+        h_mean_square = torch.mul(h_mean, h_mean) # (B, H)
 
         h_square = torch.mul(h, h) # (B, L, H)
+        weighted_h_mean_square = torch.mul(a_tensor, h_square) # (B, L, H)
 
-        weighted_square = torch.sum(torch.mul(a_tensor, h_square), dim=1)
+        weighted_square = torch.sum(weighted_h_mean_square, dim=1, keepdim=False) # (B, H)
 
-        sigma = torch.sqrt(weighted_square - torch.mul(h_mean, h_mean)) # (B, H) - (B, H)
+        # neg_tensor = weighted_square - h_mean_square
+        neg_tensor = (weighted_square - h_mean_square).clamp(min=1e-4)  
+        
+        if (neg_tensor < 0).any(): print("########## Negative value in Negative Tensor")
+        sigma = torch.sqrt(neg_tensor) # (B, H) - (B, H)
+        if torch.isnan(sigma).any(): 
+            print("########## NaN in Sigma Tensor")
+            print(torch.min(neg_tensor))
 
         tensor = torch.cat((h_mean, sigma), axis=1)
 
-        return tensor
+        return tensor, a_tensor
 
 class SE_RES2Block(nn.Module):
 
@@ -148,7 +183,7 @@ class SE_RES2Block(nn.Module):
 
         for i, tensor in enumerate(tensors):
             if i > 1:
-                tensor += last_tensor
+                tensor = tensor + last_tensor
             if i > 0:
                 tensor = self.res2conv1d_list[i-1](tensor)
                 tensor = F.relu(tensor)
@@ -179,7 +214,11 @@ class SE_RES2Block(nn.Module):
         # print(z.shape)
         # print(s.shape)
 
-        tensor = tensor + se
+        # tensor = tensor + se # Gradient Explodes!!!
+        
+        # tensor = se + input_tensor 
+
+        tensor = se
 
         # tensor += se 
         # RuntimeError: one of the variables needed for gradient computation 
@@ -196,8 +235,8 @@ class ECAPA_TDNN(nn.Module):
         self.batchnorm_in = nn.BatchNorm1d(H_CONV)
 
         self.se_res2block_1 = SE_RES2Block(8, 3, 2)
-        # self.se_res2block_2 = SE_RES2Block(8, 3, 3)
-        # self.se_res2block_3 = SE_RES2Block(8, 3, 4)
+        self.se_res2block_2 = SE_RES2Block(8, 3, 3)
+        self.se_res2block_3 = SE_RES2Block(8, 3, 4)
 
         self.conv1d_out = nn.Conv1d(3 * H_CONV, 3 * H_CONV, 1)
 
@@ -219,47 +258,61 @@ class ECAPA_TDNN(nn.Module):
 
         self.device = device
 
-    def forward(self, input_tensor, ground_truth_tensor):
+    def forward(self, input_tensor, ground_truth_tensor=None, mask_tensor=None, infer=False):
 
+        if infer:
+            return self.infer(input_tensor, mask_tensor=None)
+
+        if torch.isnan(input_tensor).any(): print("NaN in input_tensor")
         tensor = self.conv1d_in(input_tensor) # (B, M, T) -> (B, C, T)
         tensor = F.relu(tensor)
         tensor = self.batchnorm_in(tensor)
+        if torch.isnan(tensor).any(): print("NaN in first batch norm")
 
         tensor_1 = self.se_res2block_1(tensor)   # (B, C, T)
-        # tensor_2 = self.se_res2block_2(tensor_1) # (B, C, T)
-        # tensor_3 = self.se_res2block_3(tensor_2) # (B, C, T)
+        tensor_1 = tensor_1 + tensor
+        if torch.isnan(tensor_1).any(): print("NaN in tensor_1")
+        tensor_2 = self.se_res2block_2(tensor_1) # (B, C, T)
+        tensor_2 = tensor_2 + tensor_1 + tensor
+        if torch.isnan(tensor_2).any(): print("NaN in tensor_2")
+        tensor_3 = self.se_res2block_3(tensor_2) # (B, C, T)
+        tensor_3 = tensor_3 + tensor_2 + tensor_1 + tensor
+        if torch.isnan(tensor_3).any(): print("NaN in tensor_3")
 
-        # tensor = torch.cat([tensor_1, tensor_2, tensor_3], axis=1) # (B, 3C, T)
-        tensor = torch.cat([tensor_1, tensor_1, tensor_1], axis=1) # (B, 3C, T)
+        tensor = torch.cat([tensor_1, tensor_2, tensor_3], axis=1) # (B, 3C, T)
+        # tensor = torch.cat([tensor_1, tensor_1, tensor_1], axis=1) # (B, 3C, T)
+        tensor = self.conv1d_out(tensor) # (B, M, T) -> (B, C, T)
         tensor = F.relu(tensor)
 
         '''
         The dimension of the bottleneck in the SE-Block and the attention module is set to 128.
         '''
 
-        tensor = self.attentive_stat_pooling(tensor) # (B, H, L) =>  (B, H) 
+        tensor, a_tensor = self.attentive_stat_pooling(tensor, mask_tensor) # (B, H, L) =>  (B, H) 
+        if torch.isnan(tensor).any(): print("NaN in attentive_stat_pooling")
 
         tensor = self.batchnorm_2(tensor)
 
         tensor = self.fc(tensor)
 
-        # tensor = self.batchnorm_3(tensor) # (B, H)
+        tensor = self.batchnorm_3(tensor) # (B, H)
 
         tensor_g = torch.norm(tensor, dim=1, keepdim=True)
-
         normalized_tensor = tensor / tensor_g
+        if torch.isnan(normalized_tensor).any(): print("NaN in normalization")
 
         tensor = self.speaker_embedding(normalized_tensor)
-
         layer_g = self.speaker_embedding.weight_g
-
         tensor = tensor / layer_g.squeeze(1)
+
+        if torch.isnan(tensor).any(): print("NaN in normalizing speaker_embedding")
 
         # v * torch.cos(self.m) + (1 - v * v) * torch.sin(self.m)
         # (masked v)* torch.cos(self.m)
         # + torch.sqrt(masked - (masked v) * (masked v)) * torch.sin(self.m)
         # - (masked v)
 
+        # Additive Margin
         mask = label2mask(ground_truth_tensor, self.num_speakers).to(self.device)
 
         masked_embedding = tensor * mask
@@ -267,6 +320,8 @@ class ECAPA_TDNN(nn.Module):
         modified_angle = torch.clamp(modified_angle, 0, torch.acos(torch.tensor(-1.0)))
         modified_cos = torch.cos(modified_angle)
         tensor = tensor + modified_cos - masked_embedding
+
+        if torch.isnan(tensor).any(): print("NaN in maringalizing")
 
         '''
         https://kevinmusgrave.github.io/pytorch-metric-learning/losses/#arcfaceloss
@@ -301,8 +356,48 @@ class ECAPA_TDNN(nn.Module):
 
         prediction = F.log_softmax(tensor, dim=1) # (B, NUM_SPEAKERS)
 
-        return prediction
+        info_tensors = (a_tensor.detach().cpu(), )
 
+        return prediction, info_tensors
+
+    def infer(self, input_tensor, mask_tensor=None):
+        tensor = self.conv1d_in(input_tensor) # (B, M, T) -> (B, C, T)
+        tensor = F.relu(tensor)
+        tensor = self.batchnorm_in(tensor)
+        tensor_1 = self.se_res2block_1(tensor)   # (B, C, T)
+        tensor_1 = tensor_1 + tensor
+        tensor_2 = self.se_res2block_2(tensor_1) # (B, C, T)
+        tensor_2 = tensor_2 + tensor_1 + tensor
+        tensor_3 = self.se_res2block_3(tensor_2) # (B, C, T)
+        tensor_3 = tensor_3 + tensor_2 + tensor_1 + tensor
+        tensor = torch.cat([tensor_1, tensor_2, tensor_3], axis=1) # (B, 3C, T)
+        tensor = self.conv1d_out(tensor) # (B, M, T) -> (B, C, T)
+        tensor = F.relu(tensor)
+        tensor, a_tensor = self.attentive_stat_pooling(tensor, mask_tensor) # (B, H, L) =>  (B, H) 
+        tensor = self.batchnorm_2(tensor)
+        tensor = self.fc(tensor)
+        tensor = self.batchnorm_3(tensor) # (B, H)
+        tensor_g = torch.norm(tensor, dim=1, keepdim=True)
+        normalized_tensor = tensor / tensor_g
+        # tensor = self.speaker_embedding(normalized_tensor)
+        # layer_g = self.speaker_embedding.weight_g
+        # tensor = tensor / layer_g.squeeze(1)
+
+        # mask = label2mask(ground_truth_tensor, self.num_speakers).to(self.device)
+
+        # masked_embedding = tensor * mask
+        # modified_angle = torch.acos(masked_embedding) + self.m * mask
+        # modified_angle = torch.clamp(modified_angle, 0, torch.acos(torch.tensor(-1.0)))
+        # modified_cos = torch.cos(modified_angle)
+        # tensor = tensor + modified_cos - masked_embedding
+
+        # tensor = self.scale * tensor
+
+        # prediction = F.log_softmax(tensor, dim=1) # (B, NUM_SPEAKERS)
+
+        info_tensors = (a_tensor.detach().cpu(), )
+
+        return normalized_tensor, info_tensors
 
 # https://discuss.pytorch.org/t/check-the-norm-of-gradients/27961
 def get_grad_norm(model):
@@ -317,6 +412,31 @@ def get_grad_norm(model):
     grad_norm = total_norm ** (1. / 2)
 
     return grad_norm
+
+def save_checkpoint(model, optimizer, step, path, checkpoint_name='checkpoint.pt'):
+
+    checkpoint_path = os.path.join(path, checkpoint_name)
+
+    torch.save({
+        'step': step,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }, checkpoint_path)
+
+    return
+
+def load_checkpoint(model, optimizer, path, checkpoint_name='checkpoint.pt'):
+
+    checkpoint_path = os.path.join(path, checkpoint_name)
+
+    checkpoint = torch.load(checkpoint_path)
+
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    step = checkpoint['step']
+
+    return model, optimizer, step
+
 
 def main():
 

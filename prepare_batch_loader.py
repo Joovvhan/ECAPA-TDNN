@@ -40,7 +40,7 @@ with open(CONFIGURATION_FILE) as f:
 
     for key in hp:
         setattr(global_scope, key, hp[key])
-        print(f'{key} == {hp[key]}')
+        # print(f'{key} == {hp[key]}')
 
 def struct_meta(file_list, mode='vox1'):
     if mode == 'vox1':
@@ -56,6 +56,23 @@ def struct_meta(file_list, mode='vox1'):
     else:
         assert False, f'Unknown mode {mode}'
     return meta
+
+def reduce_meta(meta, speaker_num=100):
+
+    if speaker_num < 0:
+        return meta
+
+    from collections import Counter
+    c = Counter()
+
+    for m in meta:
+        c[m[1]] += 1
+
+    top_n = [d[0] for d in c.most_common(speaker_num)]
+
+    meta_filtered = list(filter(lambda x: x[1] in top_n, meta))
+    
+    return meta_filtered
 
 def mel_random_masking(tensor, masking_ratio=0.1, mel_min=-12):
 
@@ -108,7 +125,13 @@ def plot_mel_spectrograms(mel_tensor, keyword=''):
 
     return
 
-def collate_function(pairs, speaker_table):
+def pick_random_mel_segments(mel, max_mel_length):
+    L, _ = mel.shape
+    offset =  np.random.randint(L - max_mel_length)
+    mel = mel[offset:offset+max_mel_length, :]
+    return mel
+
+def collate_function(pairs, speaker_table, max_mel_length=-1):
 
     mels = list()
     speakers = list()
@@ -121,12 +144,18 @@ def collate_function(pairs, speaker_table):
         wav_file = pair[0]
         speaker =  pair[1]
         npy_file = wav_file.replace('.wav', '.npy')
-        if not os.path.isfile(npy_file):
+        if not os.path.isfile(npy_file) or not LOAD_MEL_FROM_DISK:
+        # if True:
             mel = MEL2SAMPWAVEGLOW.get_mel(wav_file).T # (MB, T) -> (T, MB)
             np.save(npy_file, mel)
         else:
             mel = torch.tensor(np.load(npy_file)) # (T, MB)
-        mel = apply_t_shift(mel, MEL_MIN)
+        mel = pick_random_mel_segments(mel, max_mel_length)
+        # mel = mel[:max_mel_length, :]
+        # Pick random mel
+
+        if APPLY_T_SHIFT:
+            mel = apply_t_shift(mel, MEL_MIN)
         mel = mel_random_masking(mel, MASKING_RATIO, MEL_MIN)
         mel = normalize_tensor(mel, MEL_MIN)
         mels.append(mel) 
@@ -218,8 +247,14 @@ def load_meta(keyword='vox1'):
 def get_dataloader(keyword='vox1', t_thres=19):
     dev_meta, test_meta = load_meta(keyword)
     
-    test_meta = [meta for meta in tqdm(test_meta) if meta[2] < t_thres]
-    dev_meta = [meta for meta in tqdm(dev_meta) if meta[2] < t_thres]
+    test_meta_ = [meta for meta in tqdm(test_meta) if meta[2] < t_thres]
+    dev_meta_ = [meta for meta in tqdm(dev_meta) if meta[2] < t_thres]
+
+    dev_meta = reduce_meta(dev_meta_, speaker_num=REDUCED_SPEAKER_NUM)
+    print(f'Meta reduced {len(dev_meta_)} => {len(dev_meta)}')
+
+    test_meta = reduce_meta(test_meta_, speaker_num=REDUCED_SPEAKER_NUM_TEST)
+    print(f'Meta reduced {len(test_meta_)} => {len(test_meta)}')
     
     test_speakers = build_speaker_dict(test_meta)
     dev_speakers = build_speaker_dict(dev_meta)
@@ -236,7 +271,9 @@ def get_dataloader(keyword='vox1', t_thres=19):
 
     dataset_dev = DataLoader(dev_meta, batch_size=BATCH_SIZE, 
                             shuffle=True, num_workers=NUM_WORKERS,
-                            collate_fn=partial(collate_function, speaker_table=dev_speakers))
+                            collate_fn=partial(collate_function, 
+                                               speaker_table=dev_speakers, 
+                                               max_mel_length=MAX_MEL_LENGTH))
 
     # dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
     #                           shuffle=False, num_workers=NUM_WORKERS,
@@ -250,9 +287,12 @@ def get_dataloader(keyword='vox1', t_thres=19):
     #                         collate_fn=test_collator,
     #                         drop_last=True)
 
-    dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
+    # dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
+    dataset_test = DataLoader(test_meta, batch_size=4, 
                         shuffle=False, num_workers=NUM_WORKERS,
-                        collate_fn=partial(collate_function, speaker_table=test_speakers),
+                        collate_fn=partial(collate_function, 
+                                           speaker_table=test_speakers,
+                                           max_mel_length=MAX_MEL_LENGTH),
                         drop_last=True)
 
     return dataset_dev, dataset_test, dev_speakers, test_speakers
@@ -284,21 +324,23 @@ def main():
 
     dev_meta = [meta for meta in tqdm(dev_meta) if meta[2] < T_THRES]
 
-    test_speakers = build_speaker_dict(test_meta)
+    dataset_dev, dataset_test, dev_speakers, test_speakers = get_dataloader('vox1', 19)
 
-    dev_speakers = build_speaker_dict(dev_meta)
+    # test_speakers = build_speaker_dict(test_meta)
+
+    # dev_speakers = build_speaker_dict(dev_meta)
 
     print(f'Test speakers {len(test_speakers)}')
     print(f'Dev speakers {len(dev_speakers)}')
 
-    dataset_dev = DataLoader(dev_meta, batch_size=BATCH_SIZE, 
-                               shuffle=True, num_workers=NUM_WORKERS,
-                               collate_fn=lambda x: collate_function(x, dev_speakers))
+    # dataset_dev = DataLoader(dev_meta, batch_size=BATCH_SIZE, 
+    #                            shuffle=True, num_workers=NUM_WORKERS,
+    #                            collate_fn=lambda x: collate_function(x, dev_speakers))
 
-    dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
-                              shuffle=False, num_workers=NUM_WORKERS,
-                              collate_fn=lambda x: collate_function(x, test_speakers),
-                              drop_last=True)
+    # dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
+    #                           shuffle=False, num_workers=NUM_WORKERS,
+    #                           collate_fn=lambda x: collate_function(x, test_speakers),
+    #                           drop_last=True)
 
     '''
     https://discuss.pytorch.org/t/supplying-arguments-to-collate-fn/25754/4
@@ -308,18 +350,17 @@ def main():
 
     for mels, mel_length, speakers in tqdm(dataset_dev):
         print(mels.shape)
-        print(speakers)
+        # print(speakers)
 
-        print(dev_speakers.decode_speaker_tensor(speakers))
+        # print(dev_speakers.decode_speaker_tensor(speakers))
         # plot_mel_spectrograms(mels, 'dev')
 
-        # break 
+        break 
         # pass
-        break
 
     for mels, mel_length, speakers in tqdm(dataset_test):
         print(mels.shape)
-        print(speakers)
+        # print(speakers)
         # plot_mel_spectrograms(mels, 'test')
 
         # break
