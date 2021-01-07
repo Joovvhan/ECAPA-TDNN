@@ -25,7 +25,7 @@
         "MAX_GRADIENT_NORM": 4.0,
         "MAX_MEL_LENGTH": 200,
         "REDUCED_SPEAKER_NUM": -1,
-        "REDUCED_SPEAKER_NUM_TEST": 10,
+        "REDUCED_SPEAKER_NUM_TEST": -1,
         "LOAD_MEL_FROM_DISK": false
     }
 }

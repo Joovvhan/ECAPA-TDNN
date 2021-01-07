@@ -72,13 +72,18 @@ def label2mask(label, h):
         
     return mask
 
-def cor_matrix_to_plt_image(matrix_tensor, step):
+def cor_matrix_to_plt_image(matrix_tensor, step, apply_diagonal_zero=True):
     
     fig = plt.figure(figsize=(36, 36))
     plt.title(f'Speaker Embedding Correlation #{step:07d}', fontsize=24)
+    
+    if apply_diagonal_zero:
+        for i in range(len(matrix_tensor)):
+            matrix_tensor[i, i] = 0
+    
     plt.imshow(matrix_tensor)
     plt.colorbar()
-    plt.clim([-1, 1])
+    # plt.clim([-1, 1])
     fig.canvas.draw()
 
     image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
@@ -97,6 +102,52 @@ def alpha_matrix_to_plt_image(alpha_matrix, step):
     plt.title(f'Alpha Matrix #{step:07d}', fontsize=24)
     plt.imshow(alpha_matrix[0, :, :])
     plt.colorbar()
+    # plt.clim([0, 1])
+    fig.canvas.draw()
+
+    image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+    image_array = np.swapaxes(image_array, 0, 2)
+    image_array = np.swapaxes(image_array, 1, 2)
+
+    plt.close()
+
+    return image_array
+
+def inference_embeddings_to_plt_hist(embedding_holder, step):
+    fig = plt.figure(figsize=(6, 6))
+    plt.title(f'Inference Similarity #{step:07d}', fontsize=18)
+
+    def mean_method(input_vector_list):
+        mean_vector = np.mean(input_vector_list, axis=0)
+        return mean_vector/np.linalg.norm(mean_vector)
+
+    mean_embedding = {key: mean_method(np.stack(embedding_holder[key])) for key in embedding_holder}
+
+    similarity_score_list = list()
+    dissimilarity_score_list = list()
+
+    for key1 in mean_embedding:
+        for key2 in mean_embedding:
+            mean_vector = mean_embedding[key1]
+            embeddings = embedding_holder[key2]
+            scores = np.matmul(embeddings, mean_vector)
+            
+            if key1 == key2:
+                similarity_score_list.extend(scores)
+            else:
+                dissimilarity_score_list.extend(scores)
+
+    plt.hist(similarity_score_list, 
+            bins=np.arange(-1, 1, 0.05), 
+            alpha = 0.5, label='sim', density=True)
+
+    plt.hist(dissimilarity_score_list, 
+            bins=np.arange(-1, 1, 0.05), 
+            alpha = 0.5, label='dis', density=True)
+    plt.legend()
+
     # plt.clim([0, 1])
     fig.canvas.draw()
 
@@ -425,18 +476,25 @@ def save_checkpoint(model, optimizer, step, path, checkpoint_name='checkpoint.pt
 
     return
 
-def load_checkpoint(model, optimizer, path, checkpoint_name='checkpoint.pt'):
+def load_checkpoint(model, optimizer, path, rank=None, checkpoint_name='checkpoint.pt'):
 
     checkpoint_path = os.path.join(path, checkpoint_name)
 
-    checkpoint = torch.load(checkpoint_path)
+    if not os.path.isfile(checkpoint_path):
+        return model, optimizer, 0
+
+    if rank is not None:
+        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
+        checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    else:
+        checkpoint = torch.load(checkpoint_path)
+
 
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     step = checkpoint['step']
 
     return model, optimizer, step
-
 
 def main():
 

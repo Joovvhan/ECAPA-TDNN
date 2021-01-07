@@ -14,6 +14,8 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+# from torch.cuda.amp import autocast, GradScaler
+
 from collections import defaultdict
 
 global_scope = sys.modules[__name__]
@@ -30,7 +32,7 @@ with open(CONFIGURATION_FILE) as f:
         setattr(global_scope, key, hp[key])
         # print(f'{key} == {hp[key]}')
 
-from main import ECAPA_TDNN, get_grad_norm, cor_matrix_to_plt_image, save_checkpoint, load_checkpoint, alpha_matrix_to_plt_image
+from main import ECAPA_TDNN, get_grad_norm, cor_matrix_to_plt_image, save_checkpoint, load_checkpoint, alpha_matrix_to_plt_image, inference_embeddings_to_plt_hist
 
 def get_grad_norm_dict(model):
 
@@ -69,8 +71,14 @@ def process(rank, world_size, run_name=None):
 
     loss_func = nn.NLLLoss()
 
+    # scaler = GradScaler()
+
     # input_tensor = torch.rand(B, M, T)
     # ground_truth_tensor = torch.randint(0, T, (B,))
+    step = 0
+
+    if run_name is not None:
+        model, optimizer, step = load_checkpoint(model, optimizer, run_name, rank)
 
     if rank == 0:
         summary_writer = SummaryWriter(run_name)
@@ -82,7 +90,7 @@ def process(rank, world_size, run_name=None):
     loss_list = list()
     acc_list = list()
     # gradient_norm_list = list()
-    step = 0
+
 
     for epoch in range(NUM_EPOCH):
 
@@ -107,15 +115,17 @@ def process(rank, world_size, run_name=None):
         model.train()
         for mels, mel_length, speakers in tqdm(dataset_dev):
             optimizer.zero_grad()
+            # with autocast():
             pred_tensor, info_tensors = model(mels.to(device), speakers.to(device)) # (B, NUM_SPEAKERS)
             loss = loss_func(pred_tensor, speakers.to(device))
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), MAX_GRADIENT_NORM) 
-
-            # grad_norm_dict = get_grad_norm_dict(model)
-
             optimizer.step()
-
+            # scaler.scale(loss).backward()
+            # scaler.step(optimizer)
+            # scaler.update()
+            # grad_norm_dict = get_grad_norm_dict(model)
+        
             step += 1
 
             if rank == 0:
@@ -171,15 +181,17 @@ def process(rank, world_size, run_name=None):
 
         if rank == 0: embedding_holder = defaultdict(list)
         for mels, mel_length, speakers in tqdm(dataset_test):
+            # with autocast():
             h_tensor, info_tensors = model(mels.to(device), infer=True) # (B, NUM_SPEAKERS)
             
             if rank == 0:
                 for h, s in zip(h_tensor.detach().cpu(), speakers):
-                    embedding_holder[s.item()].append(h)
+                    embedding_holder[s.item()].append(h.numpy())
 
         if rank == 0:
-            for key in embedding_holder:
-                print(key, len(embedding_holder[key]))
+            inference_image = inference_embeddings_to_plt_hist(embedding_holder, step)
+            summary_writer.add_image('inference/embedding_similarity', inference_image, step)
+
 
     return
 
