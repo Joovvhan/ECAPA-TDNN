@@ -91,6 +91,19 @@ def process(rank, world_size, run_name=None):
     acc_list = list()
     # gradient_norm_list = list()
 
+    # if rank == 0:
+
+    #     v = model.state_dict()['module.speaker_embedding.weight_v'].detach()
+    #     v_norm = torch.norm(v, dim=1, keepdim=True)
+    #     n = v / v_norm
+    #     print(n.shape)
+
+    #     n_norm = torch.norm(n, dim=1, keepdim=True)
+    #     print(n_norm)
+    #     print(n_norm.shape)
+        
+    #     cor_mat = torch.matmul(n, n.T) # (H, W) * (W, H)
+    #     print(torch.max(cor_mat), torch.min(cor_mat))
 
     for epoch in range(NUM_EPOCH):
 
@@ -119,7 +132,7 @@ def process(rank, world_size, run_name=None):
             pred_tensor, info_tensors = model(mels.to(device), speakers.to(device)) # (B, NUM_SPEAKERS)
             loss = loss_func(pred_tensor, speakers.to(device))
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), MAX_GRADIENT_NORM) 
+            # nn.utils.clip_grad_norm_(model.parameters(), MAX_GRADIENT_NORM) 
             optimizer.step()
             # scaler.scale(loss).backward()
             # scaler.step(optimizer)
@@ -133,6 +146,7 @@ def process(rank, world_size, run_name=None):
                 loss_list.append(loss.item())
                 prediction = torch.argmax(pred_tensor, axis=-1)
                 acc = (torch.sum((prediction == speakers.to(device)), dtype=torch.float32)/len(speakers)).detach().cpu().numpy()
+                acc = (torch.sum((prediction.cpu() == speakers), dtype=torch.float32)/len(speakers)).detach().cpu().numpy()
                 acc_list.append(acc)
 
                 # gradient_norm_list.append(get_grad_norm(model))
@@ -163,19 +177,24 @@ def process(rank, world_size, run_name=None):
                     #         g = p.detach()
                     #     elif i == 1:
                     #         v = p.detach()
-                    g = model.state_dict()['module.speaker_embedding.weight_g'].detach()
+                    # g = model.state_dict()['module.speaker_embedding.weight_g'].detach()
                     v = model.state_dict()['module.speaker_embedding.weight_v'].detach()
-
-                    n = v / g
+                    v_norm = torch.norm(v, dim=1, keepdim=True)
+                    n = v / v_norm
+                    # n = v / g
                     
-                    cor_mat = torch.matmul(n, n.T) # (H, W)
+                    cor_mat = torch.matmul(n, n.T) # (H, W) * (W, H)
                     print(torch.max(cor_mat), torch.min(cor_mat))
+                    # tensor(8.2163, device='cuda:0') tensor(-5.3087, device='cuda:0')
+                    # cor_mat must be bounded in (-1, 1)
+
                     matrix_image = cor_matrix_to_plt_image(cor_mat.cpu(), step)
                     summary_writer.add_image('train/speaker_correlation', matrix_image, step)
 
                     alpha_tensor = info_tensors[0]
-                    matrix_image = alpha_matrix_to_plt_image(alpha_tensor, step)
-                    summary_writer.add_image('train/alpha_matrix', matrix_image, step)
+                    # matrix_image = alpha_matrix_to_plt_image(alpha_tensor, step)
+                    alpha_attention_image = alpha_matrix_to_plt_image(alpha_tensor, mels, step)
+                    summary_writer.add_image('train/alpha_matrix', alpha_attention_image, step)
 
         model.eval()
 

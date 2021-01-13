@@ -273,7 +273,10 @@ def get_dataloader(keyword='vox1', t_thres=19):
                             shuffle=True, num_workers=NUM_WORKERS,
                             collate_fn=partial(collate_function, 
                                                speaker_table=dev_speakers, 
-                                               max_mel_length=MAX_MEL_LENGTH))
+                                               max_mel_length=MAX_MEL_LENGTH),
+                            prefetch_factor=NUM_WORKERS,
+                            pin_memory=True,
+                            )
 
     # dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
     #                           shuffle=False, num_workers=NUM_WORKERS,
@@ -288,12 +291,14 @@ def get_dataloader(keyword='vox1', t_thres=19):
     #                         drop_last=True)
 
     # dataset_test = DataLoader(test_meta, batch_size=BATCH_SIZE, 
-    dataset_test = DataLoader(test_meta, batch_size=4, 
-                        shuffle=False, num_workers=NUM_WORKERS,
-                        collate_fn=partial(collate_function, 
-                                           speaker_table=test_speakers,
-                                           max_mel_length=MAX_MEL_LENGTH),
-                        drop_last=True)
+    dataset_test = DataLoader(test_meta, batch_size=16,
+                              shuffle=False, num_workers=NUM_WORKERS,
+                              collate_fn=partial(collate_function, 
+                                                 speaker_table=test_speakers,
+                                                 max_mel_length=MAX_MEL_LENGTH),
+                              prefetch_factor=NUM_WORKERS,
+                              pin_memory=True,
+                              drop_last=True)
 
     return dataset_dev, dataset_test, dev_speakers, test_speakers
 

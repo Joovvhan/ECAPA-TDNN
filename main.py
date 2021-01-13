@@ -74,16 +74,35 @@ def label2mask(label, h):
 
 def cor_matrix_to_plt_image(matrix_tensor, step, apply_diagonal_zero=True):
     
-    fig = plt.figure(figsize=(36, 36))
-    plt.title(f'Speaker Embedding Correlation #{step:07d}', fontsize=24)
-    
     if apply_diagonal_zero:
         for i in range(len(matrix_tensor)):
             matrix_tensor[i, i] = 0
     
-    plt.imshow(matrix_tensor)
-    plt.colorbar()
-    # plt.clim([-1, 1])
+    fig, axes = plt.subplots(1, 3, figsize=(36, 12))
+
+    axes[0].set_title(f'Speaker Embedding Correlation #{step:07d}', fontsize=24)
+    im = axes[0].imshow(matrix_tensor)
+    fig.colorbar(im, ax=axes[0])
+
+    axes[1].set_title(f'Normalized Correlation #{step:07d}', fontsize=24)
+    im = axes[1].imshow(matrix_tensor)
+    im.set_clim([-1, 1])
+    fig.colorbar(im, ax=axes[1])
+
+    axes[2].hist(matrix_tensor.numpy().flatten(), 
+             bins=np.arange(-1, 1, 0.05), 
+             alpha = 0.5, density=True)
+    '''
+    axes[2].hist(matrix_tensor.flatten(), 
+             bins=np.arange(-1, 1, 0.05), 
+             alpha = 0.5, density=True)
+
+    /opt/conda/lib/python3.8/site-packages/numpy/lib/histograms.py:905: 
+    RuntimeWarning: invalid value encountered in true_divide
+    return n/db/n.sum(), bin_edges
+    '''
+    axes[2].set_title(f'Correlation Distribution #{step:07d}', fontsize=24)
+
     fig.canvas.draw()
 
     image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
@@ -96,13 +115,50 @@ def cor_matrix_to_plt_image(matrix_tensor, step, apply_diagonal_zero=True):
 
     return image_array
 
-def alpha_matrix_to_plt_image(alpha_matrix, step):
+# def cor_matrix_to_plt_image(matrix_tensor, step, apply_diagonal_zero=True):
     
-    fig = plt.figure(figsize=(36, 6))
-    plt.title(f'Alpha Matrix #{step:07d}', fontsize=24)
-    plt.imshow(alpha_matrix[0, :, :])
-    plt.colorbar()
-    # plt.clim([0, 1])
+#     fig = plt.figure(figsize=(36, 36))
+#     plt.title(f'Speaker Embedding Correlation #{step:07d}', fontsize=24)
+    
+#     if apply_diagonal_zero:
+#         for i in range(len(matrix_tensor)):
+#             matrix_tensor[i, i] = 0
+    
+#     plt.imshow(matrix_tensor)
+#     plt.colorbar()
+#     # plt.clim([-1, 1])
+#     fig.canvas.draw()
+
+#     image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+#     image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+#     image_array = np.swapaxes(image_array, 0, 2)
+#     image_array = np.swapaxes(image_array, 1, 2)
+
+#     plt.close()
+
+#     return image_array
+
+def alpha_matrix_to_plt_image(alpha_matrix, input_mel, step):
+    '''
+    input_mel (B, MB, T)
+    '''
+    
+    fig, axes = plt.subplots(3, 1, figsize=(24, 12))
+    alpha_matrix_slice = alpha_matrix[0, :, :].T
+    # alpha_mean = np.mean(alpha_matrix_slice, axis=0)
+    alpha_mean = torch.mean(alpha_matrix_slice, axis=0)
+    
+    im = axes[0].imshow(alpha_matrix_slice, aspect='auto')
+    axes[0].set_title(f'Alpha Matrix #{step:07d}')
+    fig.colorbar(im, ax=axes)
+
+    axes[1].plot(alpha_mean)
+    axes[1].set_xlim([0, len(alpha_mean)])
+    axes[1].set_title(f'Channel Mean Alpha')
+
+    axes[2].imshow(input_mel[0, :, :], origin='lower', aspect='auto')
+
     fig.canvas.draw()
 
     image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
@@ -114,6 +170,25 @@ def alpha_matrix_to_plt_image(alpha_matrix, step):
     plt.close()
 
     return image_array
+
+# def alpha_matrix_to_plt_image(alpha_matrix, step):
+    
+#     fig = plt.figure(figsize=(36, 6))
+#     plt.title(f'Alpha Matrix #{step:07d}', fontsize=24)
+#     plt.imshow(alpha_matrix[0, :, :])
+#     plt.colorbar()
+#     # plt.clim([0, 1])
+#     fig.canvas.draw()
+
+#     image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+#     image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+#     image_array = np.swapaxes(image_array, 0, 2)
+#     image_array = np.swapaxes(image_array, 1, 2)
+
+#     plt.close()
+
+#     return image_array
 
 def inference_embeddings_to_plt_hist(embedding_holder, step):
     fig = plt.figure(figsize=(6, 6))
