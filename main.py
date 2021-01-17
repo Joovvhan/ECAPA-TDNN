@@ -36,7 +36,8 @@ H_FC = 192
 
 # NUM_SPEAKERS = 6000
 
-HYPER_RADIUS = 1.0
+# HYPER_RADIUS = 1.0
+HYPER_RADIUS = 16.0
 
 AMM_MARGIN = 0.2
 
@@ -115,30 +116,6 @@ def cor_matrix_to_plt_image(matrix_tensor, step, apply_diagonal_zero=True):
 
     return image_array
 
-# def cor_matrix_to_plt_image(matrix_tensor, step, apply_diagonal_zero=True):
-    
-#     fig = plt.figure(figsize=(36, 36))
-#     plt.title(f'Speaker Embedding Correlation #{step:07d}', fontsize=24)
-    
-#     if apply_diagonal_zero:
-#         for i in range(len(matrix_tensor)):
-#             matrix_tensor[i, i] = 0
-    
-#     plt.imshow(matrix_tensor)
-#     plt.colorbar()
-#     # plt.clim([-1, 1])
-#     fig.canvas.draw()
-
-#     image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-#     image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-
-#     image_array = np.swapaxes(image_array, 0, 2)
-#     image_array = np.swapaxes(image_array, 1, 2)
-
-#     plt.close()
-
-#     return image_array
-
 def alpha_matrix_to_plt_image(alpha_matrix, input_mel, step):
     '''
     input_mel (B, MB, T)
@@ -170,25 +147,6 @@ def alpha_matrix_to_plt_image(alpha_matrix, input_mel, step):
     plt.close()
 
     return image_array
-
-# def alpha_matrix_to_plt_image(alpha_matrix, step):
-    
-#     fig = plt.figure(figsize=(36, 6))
-#     plt.title(f'Alpha Matrix #{step:07d}', fontsize=24)
-#     plt.imshow(alpha_matrix[0, :, :])
-#     plt.colorbar()
-#     # plt.clim([0, 1])
-#     fig.canvas.draw()
-
-#     image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-#     image_array = image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-
-#     image_array = np.swapaxes(image_array, 0, 2)
-#     image_array = np.swapaxes(image_array, 1, 2)
-
-#     plt.close()
-
-#     return image_array
 
 def inference_embeddings_to_plt_hist(embedding_holder, step):
     fig = plt.figure(figsize=(6, 6))

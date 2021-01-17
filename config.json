@@ -16,7 +16,7 @@
         "NUM_EPOCH": 288,
         "LR": 1e-5,
         "WEIGHT_DECAY": 2e-5,
-        "MASKING_RATIO": 0.1,
+        "MASKING_RATIO": 0.0,
         "APPLY_SPECAUG": false,
         "APPLY_T_SHIFT": false,
         "CHECKPOINT_STEPS": 500,
