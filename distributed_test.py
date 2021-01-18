@@ -32,7 +32,9 @@ with open(CONFIGURATION_FILE) as f:
         setattr(global_scope, key, hp[key])
         # print(f'{key} == {hp[key]}')
 
-from main import ECAPA_TDNN, get_grad_norm, cor_matrix_to_plt_image, save_checkpoint, load_checkpoint, alpha_matrix_to_plt_image, inference_embeddings_to_plt_hist
+from main import ECAPA_TDNN, get_grad_norm, cor_matrix_to_plt_image, \
+                 save_checkpoint, load_checkpoint, alpha_matrix_to_plt_image, \
+                 inference_embeddings_to_plt_hist, inference_embeddings_to_plt_hist_and_roc
 
 def get_grad_norm_dict(model):
 
@@ -208,8 +210,14 @@ def process(rank, world_size, run_name=None):
                     embedding_holder[s.item()].append(h.numpy())
 
         if rank == 0:
-            inference_image = inference_embeddings_to_plt_hist(embedding_holder, step)
-            summary_writer.add_image('inference/embedding_similarity', inference_image, step)
+            # inference_image = inference_embeddings_to_plt_hist(embedding_holder, step)
+            infer_hist, infer_roc, scores = inference_embeddings_to_plt_hist_and_roc(embedding_holder, step)
+            tp, tn, roc_auc = scores
+            summary_writer.add_image('inference/embedding_similarity', infer_hist, step)
+            summary_writer.add_image('inference/roc_curve', infer_roc, step)
+            summary_writer.add_scalar('inference/true_positive', tp, step)
+            summary_writer.add_scalar('inference/true_negative', tn, step)
+            summary_writer.add_scalar('inference/roc_auc', roc_auc, step)
 
 
     return

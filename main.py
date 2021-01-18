@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 
 import os
 
+from sklearn.metrics import roc_curve, roc_auc_score
+
 B, M, T = 4, 80, 17
 
 '''
@@ -193,6 +195,81 @@ def inference_embeddings_to_plt_hist(embedding_holder, step):
     plt.close()
 
     return image_array
+
+def inference_embeddings_to_plt_hist_and_roc(embedding_holder, step):
+
+    def mean_method(input_vector_list):
+        mean_vector = np.mean(input_vector_list, axis=0)
+        return mean_vector/np.linalg.norm(mean_vector)
+
+    mean_embedding = {key: mean_method(np.stack(embedding_holder[key])) for key in embedding_holder}
+
+    similarity_score_list = list()
+    dissimilarity_score_list = list()
+
+    for key1 in mean_embedding:
+        for key2 in mean_embedding:
+            mean_vector = mean_embedding[key1]
+            embeddings = embedding_holder[key2]
+            scores = np.matmul(embeddings, mean_vector)
+            
+            if key1 == key2:
+                similarity_score_list.extend(scores)
+            else:
+                dissimilarity_score_list.extend(scores)
+
+    true_label = np.concatenate([np.ones(len(similarity_score_list)), 
+                                 np.zeros(len(dissimilarity_score_list))])
+    
+    fpr, tpr, thresholds = roc_curve(true_label, similarity_score_list +  dissimilarity_score_list)
+    max_idx = np.argmax(tpr - fpr)
+    tp = tpr[max_idx]
+    tn = 1 - fpr[max_idx]
+
+    roc_auc = roc_auc_score(true_label, similarity_score_list +  dissimilarity_score_list)
+
+    fig = plt.figure(figsize=(6, 6))
+    plt.title(f'Inference Similarity #{step:07d}', fontsize=18)
+
+    plt.hist(similarity_score_list, 
+            bins=np.arange(-1, 1, 0.05), 
+            alpha = 0.5, label='sim', density=True)
+
+    plt.hist(dissimilarity_score_list, 
+            bins=np.arange(-1, 1, 0.05), 
+            alpha = 0.5, label='dis', density=True)
+
+    plt.axvline(x=thresholds[max_idx], c='r')
+
+    plt.legend()
+
+    fig.canvas.draw()
+
+    hist_image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    hist_image_array = hist_image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+    hist_image_array = np.swapaxes(hist_image_array, 0, 2)
+    hist_image_array = np.swapaxes(hist_image_array, 1, 2)
+
+    plt.close()
+
+    fig = plt.figure(figsize=(6, 6))
+    plt.title(f'Inference ROC Curve #{step:07d}', fontsize=18)
+    plt.plot(fpr, tpr)
+    plt.plot(fpr[max_idx], tpr[max_idx], '*', c='r', markersize=12)
+    plt.xlabel('FP')
+    plt.ylabel('TP')
+    fig.canvas.draw()
+
+    roc_image_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    roc_image_array = roc_image_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+    roc_image_array = np.swapaxes(roc_image_array, 0, 2)
+    roc_image_array = np.swapaxes(roc_image_array, 1, 2)
+
+    plt.close()
+
+    return hist_image_array, roc_image_array, (tp, tn, roc_auc)
 
 class AttentiveStatPooling(nn.Module):
 
