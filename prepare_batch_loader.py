@@ -12,8 +12,12 @@ import csv
 import os
 
 from functools import partial
-
+from pydub import AudioSegment
 from tqdm import tqdm
+from queue import Queue
+import threading
+
+from itertools import chain
 
 '''
 Folder Structure
@@ -48,11 +52,30 @@ def struct_meta(file_list, mode='vox1'):
                 librosa.get_duration(filename=file), 
                 librosa.get_samplerate(file)
                 ) for file in tqdm(file_list)]
-    elif  mode == 'vox2':
-        meta = [(file, file.split('/')[3],
-                 librosa.get_duration(filename=file), 
-                 librosa.get_samplerate(file)
-                ) for file in tqdm(file_list)]
+    elif mode == 'vox2':
+
+        def meta_thread(file_list, queue):
+            def get_duration_and_sample_rate(file):
+                audio = AudioSegment.from_file(file)
+                duration = audio.frame_count() / audio.frame_rate
+                return duration, audio.frame_rate
+
+            meta = [(file, file.split('/')[-3],
+                    *get_duration_and_sample_rate(file)
+                    ) for file in tqdm(file_list)]
+
+            queue.put(meta)
+            
+            return
+        
+        num_thread = 8
+        thread_queue = Queue()
+        threads = [threading.Thread(target=meta_thread, args=(file_list[i::num_thread], thread_queue,)) for i in range(num_thread)]
+        for t in threads: t.start()
+        for t in threads: t.join() 
+            
+        meta = list(chain(*[thread_queue.get() for i in range(num_thread)]))
+
     else:
         assert False, f'Unknown mode {mode}'
     return meta
@@ -237,8 +260,23 @@ def load_meta(keyword='vox1'):
         else:
             test_meta = read_from_csv('vox1_test.csv')
     elif keyword == 'vox2':
-        # TODO
-        pass
+        m4a_files_dev = sorted(glob('VoxCeleb2/dev/aac' + '/*/*/*.m4a'))
+        print(f'Len. m4a_files_dev {len(m4a_files_dev)}')
+
+        if not os.path.isfile('vox2_dev.csv'):
+            dev_meta = struct_meta(m4a_files_dev, mode='vox2')
+            write_to_csv(dev_meta, 'vox2_dev.csv')
+        else:
+            dev_meta = read_from_csv('vox2_dev.csv')
+
+        m4a_files_test = sorted(glob('VoxCeleb2/test/aac' + '/*/*/*.m4a'))
+        print(f'Len. m4a_files_test {len(m4a_files_test)}')
+
+        if not os.path.isfile('vox2_test.csv'):
+            test_meta = struct_meta(m4a_files_test, mode='vox2')
+            write_to_csv(test_meta, 'vox2_test.csv')
+        else:
+            test_meta = read_from_csv('vox2_test.csv')
     else:
         assert False, f'Wrong Keyword {keyword}'
 
