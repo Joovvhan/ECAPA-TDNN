@@ -9,6 +9,7 @@ Training a ECAPA-TDNN model took 3 days.
 
 
 
+
 ### Effect of Feature Re-scaling
 
 ![image](fig/s-scale.png)
@@ -37,7 +38,7 @@ Gray - s = 16
 
 
 
-Attention Matrix Alpha
+### Attention Matrix Alpha
 
 ![image](fig/alpha_attention.png)
 
@@ -47,7 +48,8 @@ Attention Matrix Alpha
 
 
 
-Speaker Embedding
+
+### Speaker Embedding
 
 ![image](fig/diagonal.png)
 
@@ -55,7 +57,8 @@ Cosine similarity of speaker embedding is being close to zero during the trainin
 
 
 
-Inference Similarity
+
+### Inference Similarity
 
 ![inference_result](fig/inference_result.png)
 
@@ -69,11 +72,12 @@ Inference result seems to be discriminitive, but there was a mistake. An identit
 
 
 
-Cosine Simarity and Dimension
+### Cosine Simarity and Dimension
 
 As dimension h increases, distribution of cosine similarity between two random vector becomes a normal distribution lower standard deviation. In other words, two random vectors are more likely to be diagonal as dimension increases.
 
 ![h_and_cos](fig/h_and_cos.png)
+
 
 # References
 
@@ -83,13 +87,13 @@ As dimension h increases, distribution of cosine similarity between two random v
 
 # TODO
 
-- [ ] Get VoxCeleb statistics (file length and counts, sampling rate)
+- [x] Get VoxCeleb statistics (file length and counts, sampling rate)
 
-- [ ] Build speaker tokenizer
+- [x] Build speaker tokenizer
 
 - [ ] Apply VAD to segment audio files
 
-- [ ] Run model on VoxCeleb1
+- [x] Run model on VoxCeleb1
 
 - [ ] Implement .m4a loading
 
