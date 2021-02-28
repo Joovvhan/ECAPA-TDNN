@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 import numpy as np
+from collections import OrderedDict
 
 from prepare_batch_loader import get_dataloader
 
@@ -594,8 +595,21 @@ def load_checkpoint(model, optimizer, path, rank=None, checkpoint_name='checkpoi
         return model, optimizer, 0
 
     if rank is not None:
-        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
-        checkpoint = torch.load(checkpoint_path, map_location=map_location)
+        
+        if rank == 'cpu':
+            map_location = torch.device('cpu')
+            checkpoint = torch.load(checkpoint_path, map_location=map_location)
+            # https://discuss.pytorch.org/t/solved-keyerror-unexpected-key-module-encoder-embedding-weight-in-state-dict/1686/3
+            new_model_checkpoint = OrderedDict()
+            for k, v in checkpoint['model_state_dict'].items():
+                key = k.replace('module.', '')
+                new_model_checkpoint[key] = v
+                # print(f'{k} => {key}')
+            checkpoint['model_state_dict'] = new_model_checkpoint
+        else:
+            map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
+            checkpoint = torch.load(checkpoint_path, map_location=map_location)
+        
     else:
         checkpoint = torch.load(checkpoint_path)
 

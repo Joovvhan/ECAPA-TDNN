@@ -154,6 +154,23 @@ def pick_random_mel_segments(mel, max_mel_length):
     mel = mel[offset:offset+max_mel_length, :]
     return mel
 
+def wav2mel_tensor(wav_files):
+
+    B = len(wav_files)
+    mels = list()
+
+    for wav_file in wav_files:
+        mel = MEL2SAMPWAVEGLOW.get_mel(wav_file).T # (MB, T) -> (T, MB)
+        # mel = pick_random_mel_segments(mel, max_mel_length)
+
+        mel = normalize_tensor(mel, MEL_MIN)
+        mels.append(mel) 
+
+    mel_tensor = pad_sequence(mels, batch_first=True, padding_value=-1).transpose(1, 2) # (B, T, MB) -> (B, MB, T)
+
+    return mel_tensor
+
+
 def collate_function(pairs, speaker_table, max_mel_length=-1):
 
     mels = list()

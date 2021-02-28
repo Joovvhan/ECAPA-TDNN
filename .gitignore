@@ -5,3 +5,7 @@ __pycache__
 *.csv
 runs/
 nohup.out
+
+.ipynb_checkpoints/
+wavs/
+*.npy
